@@ -47,6 +47,15 @@ function average_colours(state_colour, rowx, colx, new_colour)
 end
 
 
+function increment_frequency(state_freq, rowx, colx)
+    if (rowx == nothing) || (colx == nothing)
+        return
+    end
+    
+    @inbounds state_freq[rowx, colx] += 1
+end
+
+
 function reduce_across_ranks(comm, sendbuf)
     recvbuf = MPI.Reduce(sendbuf, MPI.SUM, 0, comm)
     return recvbuf
@@ -64,7 +73,7 @@ function average_across_ranks(comm, sendbuf)
 end
 
 
-function point_to_coords(nrow, ncol, x, y)
+function point_to_coords(N_row, N_col, x, y)
 
     x += 1.0
     x *= 0.5
@@ -72,13 +81,13 @@ function point_to_coords(nrow, ncol, x, y)
     y += 1.0
     y *= 0.5
     
-    x = Int(round(x * ncol))
-    if (x<1) || (x>ncol)
+    x = Int(round(x * N_col))
+    if (x<1) || (x>N_col)
         x = nothing
     end
 
-    y = Int(round(y * nrow))
-    if (y<1) || (y>ncol)
+    y = Int(round(y * N_row))
+    if (y<1) || (y>N_col)
         y = nothing
     end
     
@@ -126,7 +135,7 @@ function(v::Variation)(x, y)
     )
 end
 
-function run_trajectories(N_traj, N_steps, N_burn_in, nrow, ncol, global_state_freq, global_state_colour, funcs, colours, rng)
+function run_trajectories(N_traj, N_steps, N_burn_in, N_row, N_col, global_state_freq, global_state_colour, funcs, colours, rng)
     for trajx in 1:N_traj
         x, y = new_point(rng)
         
@@ -137,8 +146,9 @@ function run_trajectories(N_traj, N_steps, N_burn_in, nrow, ncol, global_state_f
                 x, y = funcs[f](x, y)
                 
                 if stepx > N_burn_in
-                    X, Y = point_to_coords(nrow, ncol, x, y)
+                    X, Y = point_to_coords(N_row, N_col, x, y)
                     average_colours(global_state_colour, Y, X, colours[f])
+                    increment_frequency(global_state_freq, Y, X)
                 end
             end
         end
@@ -172,16 +182,16 @@ end
 weight_sum = sum([fx[2] for fx in funcs])
 d_inc_sum = Array(cumsum([fx[2] / weight_sum for fx in funcs]))
 
-nrow = 2000
-ncol = 2000
+N_row = 1000
+N_col = 1000
 
 N_traj = 10000
 N_steps = 10000
 N_burn_in = 20
 N_funcs = length(d_inc_sum)
 
-global_state_freq = Array(zeros(Float32, nrow, ncol));
-global_state_colour = Array(zeros(Float32, nrow, ncol, 3));
+global_state_freq = Array(zeros(Int64, N_row, N_col));
+global_state_colour = Array(zeros(Float32, N_row, N_col, 3));
 
 rng = MersenneTwister(1234);
 
@@ -191,7 +201,7 @@ call_colours = [fx[3] for fx in funcs]
 if RANK == 0
     println("RUNNING...\n")
 end
-run_trajectories(Int(ceil(N_traj/SIZE)), N_steps, N_burn_in, nrow, ncol, global_state_freq, global_state_colour, call_funcs, call_colours, rng)
+run_trajectories(Int(ceil(N_traj/SIZE)), N_steps, N_burn_in, N_row, N_col, global_state_freq, global_state_colour, call_funcs, call_colours, rng)
 
 if RANK == 0
     println("SAVING...")
